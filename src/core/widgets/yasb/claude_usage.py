@@ -2,7 +2,7 @@ import re
 from datetime import UTC, datetime
 from typing import Any
 
-from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout
+from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
 
 from core.utils.tooltip import set_tooltip
 from core.utils.utilities import PopupWidget, refresh_widget_style
@@ -39,6 +39,9 @@ class UsageBar(QFrame):
 class ClaudeUsageWidget(BaseWidget):
     validation_schema = ClaudeUsageConfig
 
+    # Shown via {stale} when Claude Code's OAuth token has expired (nf-fa-warning).
+    STALE_ICON = ""
+
     def __init__(self, config: ClaudeUsageConfig):
         super().__init__(class_name="claude-usage")
         self.config = config
@@ -54,6 +57,7 @@ class ClaudeUsageWidget(BaseWidget):
 
         self.register_callback("toggle_label", self._toggle_label)
         self.register_callback("toggle_menu", self._toggle_menu)
+        self.register_callback("refresh", self._refresh)
 
         self.callback_left = self.config.callbacks.on_left
         self.callback_middle = self.config.callbacks.on_middle
@@ -79,6 +83,10 @@ class ClaudeUsageWidget(BaseWidget):
     def _on_data(self, data: dict[str, Any]) -> None:
         self._data = data
         self._update_label()
+        self._refresh_menu_sections()
+
+    def _refresh(self) -> None:
+        self._service.refresh_now()
 
     def _format_values(self) -> dict[str, str]:
         return {
@@ -86,6 +94,7 @@ class ClaudeUsageWidget(BaseWidget):
             "seven_day": self._pct(self._data.get("seven")),
             "five_hour_reset": self._fmt_reset(self._data.get("five_reset_iso")),
             "seven_day_reset": self._fmt_reset(self._data.get("seven_reset_iso")),
+            "stale": self.STALE_ICON if self._data.get("token_expired") else "",
         }
 
     @staticmethod
@@ -118,6 +127,53 @@ class ClaudeUsageWidget(BaseWidget):
             return f"{local:%a} {hour12}:{local.minute:02d} {ampm}"
         except Exception:
             return "--"
+
+    @staticmethod
+    def _fmt_duration(iso: str | None) -> str:
+        """Relative time-until-reset, e.g. '6d 21h', '4h 14m', '10m'; '--' when unknown."""
+        if not iso:
+            return "--"
+        try:
+            target = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+            seconds = int((target - datetime.now(UTC)).total_seconds())
+            if seconds <= 0:
+                return "0m"
+            minutes = seconds // 60
+            days, rem = divmod(minutes, 1440)
+            hours, mins = divmod(rem, 60)
+            if days:
+                return f"{days}d {hours}h"
+            if hours:
+                return f"{hours}h {mins}m"
+            return f"{mins}m"
+        except Exception:
+            return "--"
+
+    @staticmethod
+    def _fmt_weekday(iso: str | None, with_date: bool = False) -> str:
+        """Absolute reset as a local weekday + time, e.g. 'Sat @ 6:00 AM'; '--' when unknown.
+
+        With ``with_date`` the month/day is included ('Sat, Jun 13 @ 6:00 AM') so two windows
+        resetting on the same weekday stay distinguishable.
+        """
+        if not iso:
+            return "--"
+        try:
+            local = datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone()
+            hour12 = local.hour % 12 or 12
+            ampm = "AM" if local.hour < 12 else "PM"
+            day = f"{local:%a, %b} {local.day}" if with_date else f"{local:%a}"
+            return f"{day} @ {hour12}:{local.minute:02d} {ampm}"
+        except Exception:
+            return "--"
+
+    def _reset_phrase(self, iso: str | None, reset_format: str) -> str:
+        """Reset line for the popup footer, phrased per the window's reset_format."""
+        if reset_format == "absolute":
+            value = self._fmt_weekday(iso, with_date=self.config.reset_show_date)
+            return f"Resets on {value}" if value != "--" else "Reset time unknown"
+        value = self._fmt_duration(iso)
+        return f"Resets in {value}" if value != "--" else "Reset time unknown"
 
     @staticmethod
     def _fmt_reset_at(iso: str | None) -> str:
@@ -163,23 +219,28 @@ class ClaudeUsageWidget(BaseWidget):
                 continue
             current_widget = active_widgets[index]
             if "<span" in part and "</span>" in part:
-                current_widget.setText(re.sub(r"<span.*?>|</span>", "", part).strip())
+                text = re.sub(r"<span.*?>|</span>", "", part).strip()
             else:
-                try:
-                    current_widget.setText(part.strip().format(**values))
-                except Exception:
-                    current_widget.setText(part.strip())
+                text = part.strip()
+            try:
+                rendered = text.format(**values)
+            except Exception:
+                rendered = text
+            current_widget.setText(rendered)
+            # Hide the label when its placeholder renders empty (e.g. {stale} on a valid
+            # token) so it does not leave a constant gap from its own margin/spacing.
+            current_widget.setVisible(bool(rendered))
             if self.config.tooltip:
-                set_tooltip(
-                    current_widget,
-                    f"Claude usage — 5h: {values['five_hour']}% · 7d: {values['seven_day']}%",
-                )
+                tip = f"Claude usage — 5h: {values['five_hour']}% · 7d: {values['seven_day']}%"
+                if self._data.get("token_expired"):
+                    tip += "\nToken expired — run `claude -p` to refresh"
+                set_tooltip(current_widget, tip)
         refresh_widget_style(*active_widgets)
 
     def _toggle_menu(self) -> None:
         self._build_menu()
 
-    def _build_section(self, title: str, value: Any, raw: Any, reset_iso: str | None) -> QFrame:
+    def _build_section(self, title: str, value: Any, raw: Any, reset_iso: str | None, reset_format: str) -> QFrame:
         level = self._level_class(value)
         frame = QFrame()
         frame.setProperty("class", "section")
@@ -200,7 +261,7 @@ class ClaudeUsageWidget(BaseWidget):
         footer_layout.setContentsMargins(0, 0, 0, 0)
         footer_layout.setSpacing(0)
 
-        reset_label = QLabel(f"Resets in {self._fmt_reset(reset_iso)}")
+        reset_label = QLabel(self._reset_phrase(reset_iso, reset_format))
         reset_label.setProperty("class", "reset")
         footer_layout.addWidget(reset_label)
         footer_layout.addStretch()
@@ -217,6 +278,42 @@ class ClaudeUsageWidget(BaseWidget):
 
         return frame
 
+    def _add_menu_sections(self, layout: QVBoxLayout) -> None:
+        self._section_frames = [
+            self._build_section(
+                "5-Hour",
+                self._data.get("five"),
+                self._data.get("five_raw"),
+                self._data.get("five_reset_iso"),
+                self.config.five_hour_reset_format,
+            ),
+            self._build_section(
+                "7-Day",
+                self._data.get("seven"),
+                self._data.get("seven_raw"),
+                self._data.get("seven_reset_iso"),
+                self.config.seven_day_reset_format,
+            ),
+        ]
+        for frame in self._section_frames:
+            layout.addWidget(frame)
+
+    def _refresh_menu_sections(self) -> None:
+        """Redraw the popup sections in place when fresh data arrives while it is open."""
+        menu = self._menu
+        try:
+            if menu is None or not menu.isVisible():
+                return
+            layout = self._menu_layout
+            for frame in getattr(self, "_section_frames", []):
+                layout.removeWidget(frame)
+                frame.hide()
+                frame.deleteLater()
+            self._add_menu_sections(layout)
+            menu.adjustSize()
+        except RuntimeError:
+            self._menu = None  # popup was already destroyed
+
     def _build_menu(self) -> None:
         self._menu = PopupWidget(
             self,
@@ -230,21 +327,27 @@ class ClaudeUsageWidget(BaseWidget):
         layout = QVBoxLayout(self._menu)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
+        self._menu_layout = layout
 
-        header = QLabel("Claude Usage")
+        header = QFrame()
         header.setProperty("class", "header")
-        layout.addWidget(header)
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(0)
 
-        layout.addWidget(
-            self._build_section(
-                "5-Hour", self._data.get("five"), self._data.get("five_raw"), self._data.get("five_reset_iso")
-            )
-        )
-        layout.addWidget(
-            self._build_section(
-                "7-Day", self._data.get("seven"), self._data.get("seven_raw"), self._data.get("seven_reset_iso")
-            )
-        )
+        title_label = QLabel("Claude Usage")
+        title_label.setProperty("class", "text")
+        header_layout.addWidget(title_label)
+        header_layout.addStretch()
+
+        refresh_btn = QPushButton("\U000f0450")
+        refresh_btn.setProperty("class", "refresh")
+        set_tooltip(refresh_btn, "Refresh now")
+        refresh_btn.clicked.connect(self._refresh)
+        header_layout.addWidget(refresh_btn)
+
+        layout.addWidget(header)
+        self._add_menu_sections(layout)
 
         self._menu.adjustSize()
         self._menu.setPosition(

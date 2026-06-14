@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import Field
 
 from core.validation.widgets.base_model import (
@@ -28,6 +30,10 @@ class ClaudeUsageConfig(CustomBaseModel):
     label_alt: str = "Claude {seven_day}%"
     update_interval: int = Field(default=60, ge=30, le=3600)
     cache_ttl: int = Field(default=120, ge=0, le=3600)
+    # Popup reset line per window: "relative" -> "Resets in 4h 11m", "absolute" -> "Resets on Sat @ 6:00 AM".
+    five_hour_reset_format: Literal["relative", "absolute"] = "relative"
+    seven_day_reset_format: Literal["relative", "absolute"] = "absolute"
+    reset_show_date: bool = True
     tooltip: bool = True
     callbacks: ClaudeUsageCallbacksConfig = ClaudeUsageCallbacksConfig()
     menu: ClaudeUsageMenuConfig = ClaudeUsageMenuConfig()
