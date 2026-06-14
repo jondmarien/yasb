@@ -17,6 +17,7 @@ extra configuration is required as long as you are signed in to Claude Code.
 | `five_hour_reset_format` | string | `'relative'` | How the 5-hour window's reset line is phrased in the popup: `relative` (`Resets in 4h 11m`) or `absolute` (`Resets on Sat @ 6:00 AM`). |
 | `seven_day_reset_format` | string | `'absolute'` | How the 7-day window's reset line is phrased in the popup: `relative` or `absolute`. |
 | `reset_show_date` | boolean | `true` | In `absolute` mode, include the month/day (`Resets on Sat, Jun 13 @ 6:00 AM`) so two windows resetting on the same weekday stay distinguishable. |
+| `token_history`   | dict    | `{'enabled': false, ...}` | Optional local token-usage history. See [Token history](#token-history). |
 | `tooltip`         | boolean | `true` | Whether to show a summary tooltip on hover. |
 | `callbacks`       | dict    | `{'on_left': 'toggle_menu', 'on_middle': 'do_nothing', 'on_right': 'toggle_label'}` | Mouse-click callbacks. |
 | `menu`            | dict    | `{'blur': true, 'round_corners': true, 'round_corners_type': 'normal', 'border_color': 'System', 'alignment': 'right', 'direction': 'down', 'offset_top': 6, 'offset_left': 0}` | Popup menu settings. |
@@ -34,6 +35,8 @@ used in `label` / `label_alt`:
 - `{seven_day_reset}` — time until the 7-day window resets (e.g. `Sat 6:00 AM`).
 - `{stale}` — a warning glyph shown only while Claude Code's OAuth token has expired, empty
   otherwise. Place it in its own `<span>` (e.g. `{five_hour}% <span class='stale'>{stale}</span>`).
+- `{session_tokens}` `{today_tokens}` `{week_tokens}` `{month_tokens}` `{year_tokens}` — compact
+  token totals (e.g. `1.2M`) for each period. Require `token_history.enabled`; `--` otherwise.
 
 ```yaml
 claude_usage:
@@ -97,6 +100,37 @@ The same action is available as the `refresh` callback for any mouse button. Whi
 open, its sections redraw in place when fresh data arrives. A refresh is ignored while a fetch
 is already in flight.
 
+## Token history
+
+When `token_history.enabled` is `true`, the popup gains a **Tokens** section with a
+Session / Today / Week / Month / Year toggle, the selected period's total, and an optional
+usage graph. The same totals are available on the bar via the `{*_tokens}` placeholders.
+
+The data comes from Claude Code's own session transcripts (`~/.claude/projects/**/*.jsonl`):
+no API key and no network. Only numeric token counts, timestamps, the model name and the
+session id are read; message content is never touched. The scan is incremental (a file is
+re-parsed only when its size or mtime changes) and runs off the UI thread.
+
+```yaml
+    token_history:
+      enabled: true
+      default_period: "today"   # session | today | week | month | year
+      show_graph: true
+      show_graph_grid: false
+      week_starts_on: "monday"  # monday | sunday
+      count_cache_read: true    # false counts only new input/output/cache-creation
+      scan_interval: 120        # seconds between transcript scans (30–3600)
+```
+
+- **enabled:** Turn the Tokens section and `{*_tokens}` placeholders on.
+- **default_period:** Which period is selected when the menu first opens.
+- **show_graph / show_graph_grid:** Show a usage graph for the selected period, with an optional grid.
+- **week_starts_on:** First day of the week for the Week total.
+- **count_cache_read:** Whether cache-read tokens count toward the totals. They dominate for heavy users; set `false` for "new work only".
+- **scan_interval:** Seconds between transcript scans (30–3600).
+
+> Session is the most recently active session's whole lifetime, so it can span days and may exceed Today.
+
 ## Widget Style
 ```css
 .claude-usage {}
@@ -123,6 +157,13 @@ is already in flight.
 .claude-usage-menu .section .footer .percent.medium {}
 .claude-usage-menu .section .footer .percent.high {}
 .claude-usage-menu .section .date {}     /* absolute reset timestamp */
+/* Token history section (token_history.enabled) */
+.claude-usage-menu .section.tokens {}
+.claude-usage-menu .section .period-toggle {}
+.claude-usage-menu .section .period-btn {}
+.claude-usage-menu .section .period-btn.active {}
+.claude-usage-menu .section .token-total {}
+.claude-usage-menu .section .graph-container {}
 ```
 
 ## Example Style
