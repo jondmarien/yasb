@@ -18,6 +18,7 @@ extra configuration is required as long as you are signed in to Claude Code.
 | `seven_day_reset_format` | string | `'absolute'` | How the 7-day window's reset line is phrased in the popup: `relative` or `absolute`. |
 | `reset_show_date` | boolean | `true` | In `absolute` mode, include the month/day (`Resets on Sat, Jun 13 @ 6:00 AM`) so two windows resetting on the same weekday stay distinguishable. |
 | `token_history`   | dict    | `{'enabled': false, ...}` | Optional local token-usage history. See [Token history](#token-history). |
+| `status`          | dict    | `{'enabled': false, ...}` | Optional Claude API status indicator. See [API status](#api-status). |
 | `tooltip`         | boolean | `true` | Whether to show a summary tooltip on hover. |
 | `callbacks`       | dict    | `{'on_left': 'toggle_menu', 'on_middle': 'do_nothing', 'on_right': 'toggle_label'}` | Mouse-click callbacks. |
 | `menu`            | dict    | `{'blur': true, 'round_corners': true, 'round_corners_type': 'normal', 'border_color': 'System', 'alignment': 'right', 'direction': 'down', 'offset_top': 6, 'offset_left': 0}` | Popup menu settings. |
@@ -37,6 +38,10 @@ used in `label` / `label_alt`:
   otherwise. Place it in its own `<span>` (e.g. `{five_hour}% <span class='stale'>{stale}</span>`).
 - `{session_tokens}` `{today_tokens}` `{week_tokens}` `{month_tokens}` `{year_tokens}` — compact
   token totals (e.g. `1.2M`) for each period. Require `token_history.enabled`; `--` otherwise.
+- `{status}` — a status dot, coloured by the current Claude API status level via
+  `.status.<none|minor|major|critical>` classes. Place it in its own `<span>`. Requires
+  `status.enabled`; empty otherwise.
+- `{status_text}` — the status description (e.g. `All Systems Operational`).
 
 ```yaml
 claude_usage:
@@ -131,6 +136,25 @@ re-parsed only when its size or mtime changes) and runs off the UI thread.
 
 > Session is the most recently active session's whole lifetime, so it can span days and may exceed Today.
 
+## API status
+
+When `status.enabled` is `true`, the widget can show a coloured dot reflecting the public
+Claude API status (`status.claude.com`, no authentication). Use the `{status}` placeholder on
+the bar, and/or an optional status line in the popup header (`show_in_menu`).
+
+```yaml
+    status:
+      enabled: true
+      show_in_menu: true
+      icon: "●"           # any glyph; coloured by .status.<level>
+      poll_interval: 300  # seconds between status checks (60–3600)
+```
+
+- **enabled:** Turn the `{status}`/`{status_text}` placeholders and the menu status line on.
+- **show_in_menu:** Show a dot + description line in the popup header.
+- **icon:** The glyph used for the dot. Its colour comes from the `.status.<level>` class.
+- **poll_interval:** Seconds between status checks (60–3600).
+
 ## Widget Style
 ```css
 .claude-usage {}
@@ -138,12 +162,20 @@ re-parsed only when its size or mtime changes) and runs off the UI thread.
 .claude-usage .icon {}
 .claude-usage .label {}
 .claude-usage .stale {}              /* warning glyph while the OAuth token is expired */
+.claude-usage .status {}             /* {status} dot on the bar */
+.claude-usage .status.none {}        /* green / minor / major / critical / unknown */
+.claude-usage .status.minor {}
+.claude-usage .status.major {}
+.claude-usage .status.critical {}
 /* Popup menu */
 .claude-usage-menu {}
 .claude-usage-menu .header {}        /* header row (title + refresh button) */
 .claude-usage-menu .header .text {}  /* "Claude Usage" title */
 .claude-usage-menu .header .refresh {}        /* refresh button */
 .claude-usage-menu .header .refresh:hover {}
+.claude-usage-menu .status-row {}             /* status line below the header (show_in_menu) */
+.claude-usage-menu .status-row .dot {}        /* coloured via .dot.<level> */
+.claude-usage-menu .status-row .status-text {}
 .claude-usage-menu .section {}
 .claude-usage-menu .section .title {}
 .claude-usage-menu .section .progress {}               /* progress-bar track */
