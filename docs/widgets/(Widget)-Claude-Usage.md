@@ -21,7 +21,7 @@ extra configuration is required as long as you are signed in to Claude Code.
 | `status`          | dict    | `{'enabled': false, ...}` | Optional Claude API status indicator. See [API status](#api-status). |
 | `tooltip`         | boolean | `true` | Whether to show a summary tooltip on hover. |
 | `callbacks`       | dict    | `{'on_left': 'toggle_menu', 'on_middle': 'do_nothing', 'on_right': 'toggle_label'}` | Mouse-click callbacks. |
-| `menu`            | dict    | `{'blur': true, 'round_corners': true, 'round_corners_type': 'normal', 'border_color': 'System', 'alignment': 'right', 'direction': 'down', 'offset_top': 6, 'offset_left': 0}` | Popup menu settings. |
+| `menu`            | dict    | `{'blur': true, 'round_corners': true, 'round_corners_type': 'normal', 'border_color': 'System', 'alignment': 'right', 'direction': 'down', 'offset_top': 6, 'offset_left': 0, 'pin_icon': '', 'unpin_icon': ''}` | Popup menu settings. |
 
 ## Placeholders
 
@@ -85,6 +85,7 @@ claude_usage:
   - **alignment:** Horizontal alignment of the menu (`left`, `right`, `center`).
   - **direction:** Whether the menu opens `down` or `up`.
   - **offset_top / offset_left:** Pixel offsets for fine positioning.
+  - **pin_icon / unpin_icon:** Nerd Font glyphs for the pin button in the popup header. The button keeps the popup open and lets it be dragged when pinned.
 
 ## Authentication
 
@@ -208,6 +209,8 @@ the bar, and/or an optional status line in the popup header (`show_in_menu`).
 .claude-usage-menu .section.tokens .model-row .progress.model-2 .fill {}
 .claude-usage-menu .section.tokens .model-row .progress.model-3 .fill {}
 .claude-usage-menu .section.tokens .model-row .progress.model-4 .fill {}
+.claude-usage-menu .header .pin-btn {}        /* pin button (use font-family "Segoe Fluent Icons" for the glyphs) */
+.claude-usage-menu .header .pin-btn.pinned {} /* while pinned */
 .claude-usage-menu .section .graph-container {}
 ```
 

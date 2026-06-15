@@ -4,9 +4,9 @@ from typing import Any
 
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
 
-from core.utils.stat_popup import GraphWidget
+from core.utils.stat_popup import GraphWidget, PinnablePopup
 from core.utils.tooltip import set_tooltip
-from core.utils.utilities import PopupWidget, refresh_widget_style
+from core.utils.utilities import refresh_widget_style
 from core.validation.widgets.yasb.claude_usage import ClaudeUsageConfig
 from core.widgets.base import BaseWidget
 from core.widgets.services.claude_usage.claude_api import ClaudeUsageService
@@ -64,7 +64,7 @@ class ClaudeUsageWidget(BaseWidget):
         super().__init__(class_name="claude-usage")
         self.config = config
         self._show_alt_label = False
-        self._menu: PopupWidget | None = None
+        self._menu: PinnablePopup | None = None
         self._service_released = False
 
         self._service = ClaudeUsageService.get_instance(self.config.update_interval, self.config.cache_ttl)
@@ -580,7 +580,7 @@ class ClaudeUsageWidget(BaseWidget):
             self._menu = None  # popup was already destroyed
 
     def _build_menu(self) -> None:
-        self._menu = PopupWidget(
+        self._menu = PinnablePopup(
             self,
             self.config.menu.blur,
             self.config.menu.round_corners,
@@ -610,6 +610,22 @@ class ClaudeUsageWidget(BaseWidget):
         set_tooltip(refresh_btn, "Refresh now")
         refresh_btn.clicked.connect(self._refresh)
         header_layout.addWidget(refresh_btn)
+
+        pin_btn = QPushButton(self.config.menu.pin_icon)
+        pin_btn.setCheckable(True)
+        pin_btn.setProperty("class", "pin-btn")
+        set_tooltip(pin_btn, "Pin this window")
+
+        def _on_pin_toggled(checked: bool) -> None:
+            pin_btn.setText(self.config.menu.unpin_icon if checked else self.config.menu.pin_icon)
+            pin_btn.setProperty("class", "pin-btn pinned" if checked else "pin-btn")
+            set_tooltip(pin_btn, "Unpin this window" if checked else "Pin this window")
+            refresh_widget_style(pin_btn)
+            if self._menu is not None:
+                self._menu._is_pinned = checked
+
+        pin_btn.toggled.connect(_on_pin_toggled)
+        header_layout.addWidget(pin_btn)
 
         layout.addWidget(header)
         if self.config.status.enabled and self.config.status.show_in_menu:

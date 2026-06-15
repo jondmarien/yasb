@@ -23,6 +23,8 @@ class ClaudeUsageMenuConfig(CustomBaseModel):
     direction: str = "down"
     offset_top: int = 6
     offset_left: int = 0
+    pin_icon: str = "\ue718"
+    unpin_icon: str = "\ue77a"
 
 
 class ClaudeTokenHistoryConfig(CustomBaseModel):
