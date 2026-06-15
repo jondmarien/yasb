@@ -27,7 +27,7 @@ from core.widgets.services.claude_usage.claude_api import _claude_config_dir
 
 logger = logging.getLogger("claude_usage")
 
-CACHE_VERSION = 2
+CACHE_VERSION = 3
 # Token count order used throughout: input, output, cache_creation, cache_read.
 _TOKEN_SLOTS = 4
 
@@ -78,9 +78,17 @@ def _merge_sessions(into: dict[str, dict[str, Any]], src: dict[str, dict[str, An
     for sid, info in src.items():
         cur = into.get(sid)
         if cur is None:
-            into[sid] = {"t": list(info["t"]), "first": info["first"], "last": info["last"]}
+            into[sid] = {
+                "t": list(info["t"]),
+                "models": {m: list(c) for m, c in info.get("models", {}).items()},
+                "first": info["first"],
+                "last": info["last"],
+            }
         else:
             _add4(cur["t"], info["t"])
+            models = cur.setdefault("models", {})
+            for m, c in info.get("models", {}).items():
+                _add4(models.setdefault(m, [0, 0, 0, 0]), c)
             cur["first"] = min(cur["first"], info["first"])
             cur["last"] = max(cur["last"], info["last"])
 
@@ -130,9 +138,15 @@ def _parse_file(path: str) -> dict[str, Any]:
 
                 sess = sessions.get(sid)
                 if sess is None:
-                    sessions[sid] = {"t": list(counts), "first": tsec, "last": tsec}
+                    sessions[sid] = {
+                        "t": list(counts),
+                        "models": {model: list(counts)},
+                        "first": tsec,
+                        "last": tsec,
+                    }
                 else:
                     _add4(sess["t"], counts)
+                    _add4(sess["models"].setdefault(model, [0, 0, 0, 0]), counts)
                     sess["first"] = min(sess["first"], tsec)
                     sess["last"] = max(sess["last"], tsec)
     except Exception as e:
@@ -250,6 +264,24 @@ def _sum_month(daily: dict[str, dict[str, list[int]]], month_key: str, count_cac
     return sum(_sum_daily(daily, dk, count_cache_read) for dk in daily if dk.startswith(prefix))
 
 
+def _sorted_models(totals: dict[str, int]) -> list[tuple[str, int]]:
+    """Per-model (model_id, tokens) pairs sorted descending; drops zero totals and <synthetic>."""
+    items = [(m, n) for m, n in totals.items() if n > 0 and m != "<synthetic>"]
+    items.sort(key=lambda kv: kv[1], reverse=True)
+    return items
+
+
+def _models_in_range(
+    daily: dict[str, dict[str, list[int]]], start: datetime, end: datetime, count_cache_read: bool
+) -> list[tuple[str, int]]:
+    totals: dict[str, int] = {}
+    for date_key in _date_keys_in_range(start, end):
+        for model, counts in daily.get(date_key, {}).items():
+            total = counts[0] + counts[1] + counts[2] + (counts[3] if count_cache_read else 0)
+            totals[model] = totals.get(model, 0) + total
+    return _sorted_models(totals)
+
+
 def summarize(
     agg: dict[str, Any],
     *,
@@ -283,6 +315,7 @@ def summarize(
     session_total = 0
     session_id = None
     session_series: list[float] = []
+    session_models: list[tuple[str, int]] = []
     if sessions:
         session_id, info = max(sessions.items(), key=lambda kv: kv[1]["last"])
         t = info["t"]
@@ -291,6 +324,9 @@ def summarize(
         last = datetime.fromtimestamp(info["last"]).astimezone()
         s_start = max(first, now - timedelta(days=14))
         session_series = [_sum_hourly(hourly, k, ccr) for k in _hour_keys_in_range(s_start, last)]
+        session_models = _sorted_models(
+            {m: c[0] + c[1] + c[2] + (c[3] if ccr else 0) for m, c in info.get("models", {}).items()}
+        )
 
     series_by_period = {
         "session": session_series,
@@ -298,6 +334,13 @@ def summarize(
         "week": [_sum_daily(daily, k, ccr) for k in _date_keys_in_range(week_start, now)],
         "month": [_sum_daily(daily, k, ccr) for k in _date_keys_in_range(month_start, now)],
         "year": [_sum_month(daily, k, ccr) for k in _month_keys_in_range(year_start, now)],
+    }
+    models_by_period = {
+        "session": session_models,
+        "today": _models_in_range(daily, today_start, now, ccr),
+        "week": _models_in_range(daily, week_start, now, ccr),
+        "month": _models_in_range(daily, month_start, now, ccr),
+        "year": _models_in_range(daily, year_start, now, ccr),
     }
 
     return {
@@ -309,6 +352,7 @@ def summarize(
             "year": window_total(year_start),
         },
         "series_by_period": series_by_period,
+        "models_by_period": models_by_period,
         "session_id": session_id,
     }
 

@@ -20,7 +20,13 @@ _TOKEN_PERIODS: list[tuple[str, str]] = [
     ("month", "Month"),
     ("year", "Year"),
 ]
-_EMPTY_TOKEN_SUMMARY: dict[str, Any] = {"totals": {}, "series_by_period": {}, "session_id": None}
+_EMPTY_TOKEN_SUMMARY: dict[str, Any] = {
+    "totals": {},
+    "series_by_period": {},
+    "models_by_period": {},
+    "session_id": None,
+}
+_MODEL_FAMILIES = ("opus", "sonnet", "haiku", "fable")
 
 
 class UsageBar(QFrame):
@@ -30,10 +36,10 @@ class UsageBar(QFrame):
     low values (the QProgressBar::chunk square-fill issue), and stays fully CSS-styleable.
     """
 
-    def __init__(self, value: int, level: str, parent: QFrame | None = None):
+    def __init__(self, value: int, level: str, accent: str = "", parent: QFrame | None = None):
         super().__init__(parent)
         self._value = max(0, min(100, value))
-        self.setProperty("class", f"progress {level}")
+        self.setProperty("class", " ".join(c for c in ("progress", level, accent) if c))
         self._fill = QFrame(self)
         self._fill.setProperty("class", "fill")
 
@@ -71,6 +77,8 @@ class ClaudeUsageWidget(BaseWidget):
         self._period_buttons: dict[str, QPushButton] = {}
         self._token_total_label: QLabel | None = None
         self._token_graph: GraphWidget | None = None
+        self._model_container: QFrame | None = None
+        self._model_layout: QVBoxLayout | None = None
         if self.config.token_history.enabled:
             self._token_service = TokenHistoryService.get_instance(self.config.token_history.scan_interval)
             self._token_summary = self._summarize_tokens(self._token_service.latest())
@@ -207,6 +215,17 @@ class ClaudeUsageWidget(BaseWidget):
             "status": self.config.status.icon if self.config.status.enabled else "",
             "status_text": self._status.get("description", "") if self.config.status.enabled else "",
         }
+
+    @staticmethod
+    def _pretty_model(model_id: str) -> str:
+        """'claude-opus-4-6' -> 'Opus 4.6'. Family + the first two short (<=2 digit) version
+        groups, ignoring date stamps. Ids without a known family are returned unchanged."""
+        lowered = model_id.lower()
+        family = next((f for f in _MODEL_FAMILIES if f in lowered), None)
+        if family is None:
+            return model_id
+        shorts = [n for n in re.findall(r"\d+", lowered) if len(n) <= 2]
+        return f"{family.capitalize()} {'.'.join(shorts[:2])}".rstrip()
 
     @staticmethod
     def _pct(value: Any) -> str:
@@ -403,6 +422,26 @@ class ClaudeUsageWidget(BaseWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
+        if th.show_models:
+            self._model_container = QFrame()
+            self._model_container.setProperty("class", "model-usage")
+            container_layout = QVBoxLayout(self._model_container)
+            container_layout.setContentsMargins(0, 0, 0, 0)
+            container_layout.setSpacing(0)
+            model_title = QLabel("Models")
+            model_title.setProperty("class", "title")
+            container_layout.addWidget(model_title)
+            rows = QFrame()
+            rows.setProperty("class", "model-rows")
+            self._model_layout = QVBoxLayout(rows)
+            self._model_layout.setContentsMargins(0, 0, 0, 0)
+            self._model_layout.setSpacing(0)
+            container_layout.addWidget(rows)
+            layout.addWidget(self._model_container)
+        else:
+            self._model_container = None
+            self._model_layout = None
+
         title_label = QLabel("Tokens")
         title_label.setProperty("class", "title")
         layout.addWidget(title_label)
@@ -458,12 +497,49 @@ class ClaudeUsageWidget(BaseWidget):
             if self._token_graph is not None:
                 series = self._token_summary.get("series_by_period", {}).get(self._selected_period, [])
                 peak = max(series) if series else 0
-                self._token_graph.set_data([(v / peak * 100.0) if peak else 0.0 for v in series])
+                normalized = [(v / peak * 100.0) if peak else 0.0 for v in series]
+                if len(normalized) == 1:
+                    # Duplicate a lone sample so the graph draws a flat line rather than nothing.
+                    normalized.append(normalized[0])
+                self._token_graph.set_data(normalized)
+            self._sync_model_rows()
         except RuntimeError:
             # Popup (and its labels) was destroyed; references are stale until reopened.
             self._token_total_label = None
             self._token_graph = None
             self._period_buttons = {}
+
+    def _sync_model_rows(self) -> None:
+        """Rebuild the per-model bars for the selected period; hide the container when empty."""
+        if self._model_layout is None:
+            return
+        try:
+            while self._model_layout.count():
+                item = self._model_layout.takeAt(0)
+                widget = item.widget()
+                if widget is not None:
+                    widget.deleteLater()
+            models = self._token_summary.get("models_by_period", {}).get(self._selected_period, [])[:5]
+            self._model_container.setVisible(bool(models))
+            peak = models[0][1] if models else 0
+            for index, (model_id, total) in enumerate(models):
+                row = QFrame()
+                row.setProperty("class", "model-row")
+                row_layout = QHBoxLayout(row)
+                row_layout.setContentsMargins(0, 0, 0, 0)
+                row_layout.setSpacing(0)
+                name = QLabel(self._pretty_model(model_id))
+                name.setProperty("class", "model-name")
+                row_layout.addWidget(name)
+                bar = UsageBar(int(total / peak * 100) if peak else 0, "", accent=f"model-{index % 5}")
+                row_layout.addWidget(bar, 1)
+                total_label = QLabel(self._fmt_tokens(total))
+                total_label.setProperty("class", "model-total")
+                row_layout.addWidget(total_label)
+                self._model_layout.addWidget(row)
+        except RuntimeError:
+            self._model_container = None
+            self._model_layout = None
 
     def _add_menu_sections(self, layout: QVBoxLayout) -> None:
         self._section_frames = [

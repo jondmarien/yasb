@@ -131,6 +131,7 @@ re-parsed only when its size or mtime changes) and runs off the UI thread.
 - **enabled:** Turn the Tokens section and `{*_tokens}` placeholders on.
 - **default_period:** Which period is selected when the menu first opens.
 - **show_graph / show_graph_grid:** Show a usage graph for the selected period, with an optional grid.
+- **show_models:** Show a per-model token breakdown in the Tokens section, following the selected period. Top 5 models, computed from local transcripts.
 - **week_starts_on:** First day of the week for the Week total.
 - **count_cache_read:** Whether cache-read tokens count toward the totals. They dominate for heavy users; set `false` for "new work only".
 - **scan_interval:** Seconds between transcript scans (30–3600).
@@ -196,6 +197,17 @@ the bar, and/or an optional status line in the popup header (`show_in_menu`).
 .claude-usage-menu .section .period-btn {}
 .claude-usage-menu .section .period-btn.active {}
 .claude-usage-menu .section .token-total {}
+.claude-usage-menu .section.tokens .model-usage {}      /* per-model breakdown container */
+.claude-usage-menu .section.tokens .model-usage .title {} /* "Models" header */
+.claude-usage-menu .section.tokens .model-rows {}       /* the per-model bar rows */
+.claude-usage-menu .section.tokens .model-row {}        /* one model: name | bar | total */
+.claude-usage-menu .section.tokens .model-name {}
+.claude-usage-menu .section.tokens .model-total {}
+.claude-usage-menu .section.tokens .model-row .progress.model-0 .fill {}  /* bar accent 0..4 */
+.claude-usage-menu .section.tokens .model-row .progress.model-1 .fill {}
+.claude-usage-menu .section.tokens .model-row .progress.model-2 .fill {}
+.claude-usage-menu .section.tokens .model-row .progress.model-3 .fill {}
+.claude-usage-menu .section.tokens .model-row .progress.model-4 .fill {}
 .claude-usage-menu .section .graph-container {}
 ```
 

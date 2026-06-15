@@ -30,6 +30,7 @@ class ClaudeTokenHistoryConfig(CustomBaseModel):
     default_period: Literal["session", "today", "week", "month", "year"] = "today"
     show_graph: bool = False
     show_graph_grid: bool = False
+    show_models: bool = False
     week_starts_on: Literal["monday", "sunday"] = "monday"
     # Cache-read tokens dominate the totals for heavy users; set false for "new work only".
     count_cache_read: bool = True
