@@ -4,7 +4,7 @@ from typing import Any
 
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
 
-from core.utils.stat_popup import GraphWidget, PinnablePopup
+from core.utils.stat_popup import GraphWidget, PinnablePopup, create_pin_button
 from core.utils.tooltip import set_tooltip
 from core.utils.utilities import refresh_widget_style
 from core.validation.widgets.yasb.claude_usage import ClaudeUsageConfig
@@ -65,6 +65,7 @@ class ClaudeUsageWidget(BaseWidget):
         self.config = config
         self._show_alt_label = False
         self._menu: PinnablePopup | None = None
+        self._usage_frames: list[QFrame] = []
         self._service_released = False
 
         self._service = ClaudeUsageService.get_instance(self.config.update_interval, self.config.cache_ttl)
@@ -137,10 +138,12 @@ class ClaudeUsageWidget(BaseWidget):
     def _on_data(self, data: dict[str, Any]) -> None:
         self._data = data
         self._update_label()
-        self._refresh_menu_sections()
+        self._refresh_usage_sections()
 
     def _refresh(self) -> None:
         self._service.refresh_now()
+        if self._status_service is not None:
+            self._status_service.refresh_now()
 
     def _summarize_tokens(self, agg: dict[str, Any]) -> dict[str, Any]:
         th = self.config.token_history
@@ -194,10 +197,16 @@ class ClaudeUsageWidget(BaseWidget):
         if not isinstance(value, (int, float)):
             return "--"
         n = int(value)
-        for div, unit in ((1_000_000_000_000, "T"), (1_000_000_000, "B"), (1_000_000, "M"), (1_000, "K")):
-            if n >= div:
-                return f"{n / div:.1f}".rstrip("0").rstrip(".") + unit
-        return str(n)
+        if n < 1000:
+            return str(n)
+        units = ("K", "M", "B", "T")
+        magnitude = 0
+        scaled = n / 1000.0
+        # Rounding can lift a value to 1000 of its unit (999_999 -> "1000K"); carry it up instead.
+        while round(scaled, 1) >= 1000 and magnitude < len(units) - 1:
+            scaled /= 1000.0
+            magnitude += 1
+        return f"{scaled:.1f}".rstrip("0").rstrip(".") + units[magnitude]
 
     def _format_values(self) -> dict[str, str]:
         totals = self._token_summary.get("totals", {})
@@ -541,8 +550,8 @@ class ClaudeUsageWidget(BaseWidget):
             self._model_container = None
             self._model_layout = None
 
-    def _add_menu_sections(self, layout: QVBoxLayout) -> None:
-        self._section_frames = [
+    def _build_usage_frames(self) -> list[QFrame]:
+        return [
             self._build_section(
                 "5-Hour",
                 self._data.get("five"),
@@ -558,23 +567,33 @@ class ClaudeUsageWidget(BaseWidget):
                 self.config.seven_day_reset_format,
             ),
         ]
-        if self.config.token_history.enabled:
-            self._section_frames.append(self._build_token_section())
-        for frame in self._section_frames:
-            layout.addWidget(frame)
 
-    def _refresh_menu_sections(self) -> None:
-        """Redraw the popup sections in place when fresh data arrives while it is open."""
+    def _add_menu_sections(self, layout: QVBoxLayout) -> None:
+        self._usage_frames = self._build_usage_frames()
+        for frame in self._usage_frames:
+            layout.addWidget(frame)
+        if self.config.token_history.enabled:
+            layout.addWidget(self._build_token_section())
+
+    def _refresh_usage_sections(self) -> None:
+        """Rebuild the 5h/7d sections in place when fresh usage data arrives while the popup is open.
+
+        The token section keeps its own state and refreshes separately, so it stays put rather than
+        being rebuilt, which would otherwise discard the graph and per-model rows on every poll.
+        """
         menu = self._menu
         try:
             if menu is None or not menu.isVisible():
                 return
             layout = self._menu_layout
-            for frame in getattr(self, "_section_frames", []):
-                layout.removeWidget(frame)
-                frame.hide()
-                frame.deleteLater()
-            self._add_menu_sections(layout)
+            new_frames = self._build_usage_frames()
+            for old, new in zip(self._usage_frames, new_frames):
+                index = layout.indexOf(old)
+                layout.removeWidget(old)
+                old.hide()
+                old.deleteLater()
+                layout.insertWidget(index, new)
+            self._usage_frames = new_frames
             menu.adjustSize()
         except RuntimeError:
             self._menu = None  # popup was already destroyed
@@ -611,20 +630,7 @@ class ClaudeUsageWidget(BaseWidget):
         refresh_btn.clicked.connect(self._refresh)
         header_layout.addWidget(refresh_btn)
 
-        pin_btn = QPushButton(self.config.menu.pin_icon)
-        pin_btn.setCheckable(True)
-        pin_btn.setProperty("class", "pin-btn")
-        set_tooltip(pin_btn, "Pin this window")
-
-        def _on_pin_toggled(checked: bool) -> None:
-            pin_btn.setText(self.config.menu.unpin_icon if checked else self.config.menu.pin_icon)
-            pin_btn.setProperty("class", "pin-btn pinned" if checked else "pin-btn")
-            set_tooltip(pin_btn, "Unpin this window" if checked else "Pin this window")
-            refresh_widget_style(pin_btn)
-            if self._menu is not None:
-                self._menu._is_pinned = checked
-
-        pin_btn.toggled.connect(_on_pin_toggled)
+        pin_btn = create_pin_button(self._menu, self.config.menu.pin_icon, self.config.menu.unpin_icon)
         header_layout.addWidget(pin_btn)
 
         layout.addWidget(header)

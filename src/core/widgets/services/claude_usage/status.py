@@ -91,6 +91,10 @@ class ClaudeStatusService(QObject):
     def latest(self) -> dict[str, Any]:
         return self._data
 
+    def refresh_now(self) -> None:
+        """Force an immediate status fetch; an in-flight fetch is still deduplicated."""
+        self._tick()
+
     def release(self) -> None:
         self._refcount -= 1
         if self._refcount > 0:

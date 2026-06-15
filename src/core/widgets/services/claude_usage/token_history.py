@@ -30,6 +30,11 @@ logger = logging.getLogger("claude_usage")
 CACHE_VERSION = 3
 # Token count order used throughout: input, output, cache_creation, cache_read.
 _TOKEN_SLOTS = 4
+# Retention caps applied on every scan so the cache and per-tick merge stay bounded over time.
+# Hourly only feeds the Today/Session graphs (Session spans at most 14 days); daily feeds up to
+# the Year view (one calendar year).
+HOURLY_RETENTION_DAYS = 15
+DAILY_RETENTION_DAYS = 400
 
 
 def _projects_dir() -> str:
@@ -154,6 +159,20 @@ def _parse_file(path: str) -> dict[str, Any]:
     return {"daily": daily, "hourly": hourly, "sessions": sessions}
 
 
+def _prune(daily: dict[str, Any], hourly: dict[str, Any], now: datetime) -> None:
+    """Drop daily buckets older than DAILY_RETENTION_DAYS and hourly older than HOURLY_RETENTION_DAYS.
+
+    Bucket keys are zero-padded local timestamps, so they sort chronologically and compare against
+    a cutoff key directly.
+    """
+    day_cutoff = f"{now - timedelta(days=DAILY_RETENTION_DAYS):%Y-%m-%d}"
+    hour_cutoff = f"{now - timedelta(days=HOURLY_RETENTION_DAYS):%Y-%m-%dT%H}"
+    for key in [k for k in daily if k < day_cutoff]:
+        del daily[key]
+    for key in [k for k in hourly if k < hour_cutoff]:
+        del hourly[key]
+
+
 def scan(cache_path: str) -> dict[str, Any]:
     """Incrementally scan all session transcripts and return the merged aggregate.
 
@@ -163,12 +182,17 @@ def scan(cache_path: str) -> dict[str, Any]:
     cache = _read_json(cache_path) or {}
     prev_files: dict[str, Any] = cache.get("files", {}) if cache.get("version") == CACHE_VERSION else {}
 
+    now = datetime.now().astimezone()
+    file_cutoff = now.timestamp() - DAILY_RETENTION_DAYS * 86400
     current_files: dict[str, Any] = {}
     pattern = os.path.join(_projects_dir(), "**", "*.jsonl")
     for path in glob.glob(pattern, recursive=True):
         try:
             st = os.stat(path)
         except OSError:
+            continue
+        if st.st_mtime < file_cutoff:
+            # The whole transcript predates the daily window; skipping it keeps `files` bounded.
             continue
         prev = prev_files.get(path)
         if prev and prev.get("mtime") == st.st_mtime and prev.get("size") == st.st_size:
@@ -191,6 +215,7 @@ def scan(cache_path: str) -> dict[str, Any]:
         _merge_hourly(hourly, fc.get("hourly", {}))
         _merge_sessions(sessions, fc["sessions"])
 
+    _prune(daily, hourly, now)
     _write_json(
         cache_path,
         {
