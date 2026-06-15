@@ -518,6 +518,13 @@ class ClaudeUsageWidget(BaseWidget):
                     normalized.append(normalized[0])
                 self._token_graph.set_data(normalized)
             self._sync_model_rows()
+            if self._menu is not None and self._menu.isVisible():
+                # A period switch changes the model-row count. activate() refreshes the cached
+                # size hint after the rebuild, and resize() (not adjustSize, which only grows a
+                # visible window) makes the popup track its content both ways, so it neither
+                # crams the taller periods nor stretches the shorter ones.
+                self._menu_layout.activate()
+                self._menu.resize(self._menu.sizeHint())
         except RuntimeError:
             # Popup (and its labels) was destroyed; references are stale until reopened.
             self._token_total_label = None
@@ -533,6 +540,9 @@ class ClaudeUsageWidget(BaseWidget):
                 item = self._model_layout.takeAt(0)
                 widget = item.widget()
                 if widget is not None:
+                    # Detach now (not just deleteLater) so the popup's size hint reflects the new
+                    # row count synchronously, letting the caller resize the popup correctly.
+                    widget.setParent(None)
                     widget.deleteLater()
             models = self._token_summary.get("models_by_period", {}).get(self._selected_period, [])[:5]
             self._model_container.setVisible(bool(models))
