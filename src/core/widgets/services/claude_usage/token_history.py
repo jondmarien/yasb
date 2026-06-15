@@ -6,8 +6,8 @@ Claude Code writes a JSONL transcript per session under
 aggregates the token counts into per-day (local time), per-hour and per-session
 buckets, which the widget turns into Session / Today / Week / Month / Year totals.
 
-Only numeric token counts, timestamps, the model name and the session id are
-read; message content is never touched. The scan is incremental: each file's
+Only numeric token counts, timestamps, the model name, the request speed and the
+session id are read; message content is never touched. The scan is incremental: each file's
 parsed contribution is cached keyed by (mtime, size), so a steady-state poll
 only re-parses the session file(s) that actually changed.
 """
@@ -27,7 +27,7 @@ from core.widgets.services.claude_usage.claude_api import _claude_config_dir
 
 logger = logging.getLogger("claude_usage")
 
-CACHE_VERSION = 3
+CACHE_VERSION = 4
 # Token count order used throughout: input, output, cache_creation, cache_read.
 _TOKEN_SLOTS = 4
 # Retention caps applied on every scan so the cache and per-tick merge stay bounded over time.
@@ -135,6 +135,9 @@ def _parse_file(path: str) -> dict[str, Any]:
                 hour_key = f"{local:%Y-%m-%dT%H}"
                 tsec = local.timestamp()
                 model = message.get("model") or "unknown"
+                if usage.get("speed") == "fast":
+                    # Fast mode keeps the same model id but bills at a premium, so track it apart.
+                    model = f"{model}[fast]"
                 sid = obj.get("sessionId") or "unknown"
 
                 slot = daily.setdefault(date_key, {}).setdefault(model, [0, 0, 0, 0])

@@ -26,7 +26,6 @@ _EMPTY_TOKEN_SUMMARY: dict[str, Any] = {
     "models_by_period": {},
     "session_id": None,
 }
-_MODEL_FAMILIES = ("opus", "sonnet", "haiku", "fable")
 
 
 class UsageBar(QFrame):
@@ -227,14 +226,21 @@ class ClaudeUsageWidget(BaseWidget):
 
     @staticmethod
     def _pretty_model(model_id: str) -> str:
-        """'claude-opus-4-6' -> 'Opus 4.6'. Family + the first two short (<=2 digit) version
-        groups, ignoring date stamps. Ids without a known family are returned unchanged."""
+        """Display name derived from the id so new models need no upkeep: the name is the first
+        word after the 'claude-' prefix and the version is the first two short (<=2 digit) groups
+        (date stamps and a bracketed suffix are dropped). A '[fast]' tag, added when the request
+        ran in fast mode, renders as a trailing 'Fast'. Non-Claude ids are returned unchanged."""
         lowered = model_id.lower()
-        family = next((f for f in _MODEL_FAMILIES if f in lowered), None)
-        if family is None:
+        if not lowered.startswith("claude-"):
             return model_id
-        shorts = [n for n in re.findall(r"\d+", lowered) if len(n) <= 2]
-        return f"{family.capitalize()} {'.'.join(shorts[:2])}".rstrip()
+        is_fast = "[fast]" in lowered
+        parts = lowered.split("[", 1)[0].removeprefix("claude-").split("-")
+        name = next((p for p in parts if p.isalpha()), None)
+        if name is None:
+            return model_id
+        nums = [p for p in parts if p.isdigit() and len(p) <= 2]
+        label = f"{name.capitalize()} {'.'.join(nums[:2])}".rstrip()
+        return f"{label} Fast" if is_fast else label
 
     @staticmethod
     def _pct(value: Any) -> str:
